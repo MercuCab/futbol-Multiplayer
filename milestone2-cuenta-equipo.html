@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Fútbol Multiplayer — Tu equipo (Milestone 2)</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0d10;
+    --card:#161a1f;
+    --accent:#3aa0ff;
+    --accent2:#ff5a3a;
+    --text:#eee;
+    --muted:#9aa4ad;
+    --danger:#ff5a5a;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; min-height:100%;
+    background:var(--bg); color:var(--text);
+    font-family:'Segoe UI', system-ui, sans-serif;
+  }
+  body{
+    display:flex; align-items:center; justify-content:center;
+    padding:24px;
+  }
+  .card{
+    width:100%; max-width:380px;
+    background:var(--card);
+    border-radius:16px;
+    padding:28px 24px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);
+  }
+  .card.wide{ max-width:520px; }
+  h1{
+    font-size:22px; margin:0 0 4px 0; text-align:center;
+  }
+  .sub{
+    text-align:center; color:var(--muted); font-size:13px; margin-bottom:22px;
+  }
+  label{
+    display:block; font-size:13px; color:var(--muted); margin:14px 0 6px 0;
+  }
+  input{
+    width:100%; padding:12px 14px;
+    border-radius:10px; border:1px solid #2a2f36;
+    background:#0e1114; color:var(--text);
+    font-size:15px;
+  }
+  input:focus{ outline:none; border-color:var(--accent); }
+  button{
+    width:100%; margin-top:20px;
+    padding:13px; border:none; border-radius:10px;
+    background:var(--accent); color:#fff;
+    font-size:15px; font-weight:700; cursor:pointer;
+  }
+  button:disabled{ opacity:.5; cursor:default; }
+  button.secondary{
+    background:transparent; border:1px solid #2a2f36; color:var(--text);
+    margin-top:10px;
+  }
+  .msg{
+    margin-top:14px; font-size:13px; text-align:center;
+    padding:10px; border-radius:8px;
+  }
+  .msg.error{ background:rgba(255,90,90,.12); color:var(--danger); }
+  .msg.ok{ background:rgba(58,160,255,.12); color:var(--accent); }
+  .hidden{ display:none !important; }
+
+  .teamBadge{
+    text-align:center;
+  }
+  .teamBadge .crest{
+    width:84px; height:84px; border-radius:50%;
+    background:linear-gradient(135deg, var(--accent), var(--accent2));
+    margin:0 auto 14px auto;
+    display:flex; align-items:center; justify-content:center;
+    font-size:34px; font-weight:900;
+  }
+  .teamBadge h2{ margin:0 0 4px 0; font-size:20px; }
+  .teamBadge .division{
+    display:inline-block; margin-top:6px;
+    padding:5px 14px; border-radius:20px;
+    background:rgba(255,255,255,.08);
+    font-size:13px; color:var(--muted);
+  }
+  .userLine{
+    margin-top:22px; padding-top:16px; border-top:1px solid #2a2f36;
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:13px; color:var(--muted);
+  }
+  .userLine button{
+    width:auto; margin:0; padding:8px 14px; font-size:12px;
+    background:transparent; border:1px solid #2a2f36; color:var(--muted);
+  }
+
+  .standings{
+    margin-top:24px; padding-top:18px; border-top:1px solid #2a2f36;
+  }
+  .standings h3{
+    font-size:14px; margin:0 0 12px 0; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.5px;
+  }
+  .standingsScroll{ overflow-x:auto; }
+  table.standingsTable{
+    width:100%; border-collapse:collapse; font-size:12.5px; white-space:nowrap;
+  }
+  table.standingsTable th, table.standingsTable td{
+    padding:7px 6px; text-align:center;
+  }
+  table.standingsTable th{
+    color:var(--muted); font-weight:600; font-size:11px;
+    border-bottom:1px solid #2a2f36;
+  }
+  table.standingsTable td:nth-child(2), table.standingsTable th:nth-child(2){
+    text-align:left;
+  }
+  table.standingsTable td.pts{ font-weight:800; color:var(--text); }
+  table.standingsTable tr.me{ background:rgba(58,160,255,.12); }
+  table.standingsTable tr.me td:nth-child(2){ color:var(--accent); font-weight:700; }
+</style>
+</head>
+<body>
+
+<div class="card" id="authCard">
+  <h1>⚽ Fútbol Multiplayer</h1>
+  <div class="sub">Elegí tu nombre de DT y arrancá a jugar</div>
+
+  <label>Nombre de usuario</label>
+  <input type="text" id="username" autocomplete="username" placeholder="Ej: eduCRM" maxlength="24">
+
+  <button id="submitBtn">Jugar</button>
+
+  <div id="authMsg"></div>
+</div>
+
+<div class="card hidden" id="teamCard">
+  <div id="createTeamBlock" class="hidden">
+    <h1>Creá tu equipo</h1>
+    <div class="sub">Arrancás en <b>Primera D</b> y ascendés jugando</div>
+    <label>Nombre del club</label>
+    <input type="text" id="teamName" placeholder="Ej: Atlético Ibero">
+    <button id="createTeamBtn">Fundar equipo</button>
+    <div id="teamMsg"></div>
+  </div>
+
+  <div id="teamBadgeBlock" class="teamBadge hidden">
+    <div class="crest" id="crestInitial">?</div>
+    <h2 id="teamNameLabel">—</h2>
+    <div class="division" id="teamDivisionLabel">—</div>
+    <button id="playBtn" style="margin-top:18px;">Buscar partido</button>
+  </div>
+
+  <div id="standingsBlock" class="standings hidden">
+    <h3 id="standingsTitle">Tabla de posiciones</h3>
+    <div class="standingsScroll">
+      <table class="standingsTable">
+        <thead>
+          <tr>
+            <th>#</th><th>Equipo</th><th>PJ</th><th>PG</th><th>PE</th><th>PP</th><th>GF</th><th>GC</th><th>DG</th><th>Pts</th>
+          </tr>
+        </thead>
+        <tbody id="standingsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="userLine">
+    <span id="userEmailLabel"></span>
+    <button id="logoutBtn">Salir</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const SUPABASE_URL = 'https://apfyquqizpjwhtbfozks.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_4ZKllj-j1j5LVRAwQL7NSQ_e9AErYWk';
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const authCard = document.getElementById('authCard');
+  const teamCard = document.getElementById('teamCard');
+  const usernameInput = document.getElementById('username');
+  const submitBtn = document.getElementById('submitBtn');
+  const authMsg = document.getElementById('authMsg');
+
+  const createTeamBlock = document.getElementById('createTeamBlock');
+  const teamBadgeBlock = document.getElementById('teamBadgeBlock');
+  const teamNameInput = document.getElementById('teamName');
+  const createTeamBtn = document.getElementById('createTeamBtn');
+  const teamMsg = document.getElementById('teamMsg');
+  const crestInitial = document.getElementById('crestInitial');
+  const teamNameLabel = document.getElementById('teamNameLabel');
+  const teamDivisionLabel = document.getElementById('teamDivisionLabel');
+  const userEmailLabel = document.getElementById('userEmailLabel');
+  const logoutBtn = document.getElementById('logoutBtn');
+  const standingsBlock = document.getElementById('standingsBlock');
+  const standingsTitle = document.getElementById('standingsTitle');
+  const standingsBody = document.getElementById('standingsBody');
+  const playBtn = document.getElementById('playBtn');
+  playBtn.addEventListener('click', () => { window.location.href = 'milestone4-partido-online.html'; });
+
+  function setMsg(el, text, type){
+    el.textContent = text;
+    el.className = 'msg ' + (type || '');
+  }
+  function clearMsg(el){ el.textContent = ''; el.className = ''; }
+
+  submitBtn.addEventListener('click', async () => {
+    const username = usernameInput.value.trim();
+    if (!username){
+      setMsg(authMsg, 'Elegí un nombre de usuario.', 'error');
+      return;
+    }
+    submitBtn.disabled = true;
+    clearMsg(authMsg);
+
+    const { data, error } = await sb.auth.signInAnonymously({
+      options: { data: { username } }
+    });
+
+    submitBtn.disabled = false;
+    if (error){
+      setMsg(authMsg, error.message.includes('Anonymous sign-ins are disabled')
+        ? 'Falta activar "Anonymous sign-ins" en Supabase (Authentication → Sign In / Providers → Anonymous).'
+        : error.message, 'error');
+      return;
+    }
+    onLoggedIn();
+  });
+
+  logoutBtn.addEventListener('click', async () => {
+    await sb.auth.signOut();
+    location.reload();
+  });
+
+  async function onLoggedIn(){
+    authCard.classList.add('hidden');
+    teamCard.classList.remove('hidden');
+
+    const { data: { user } } = await sb.auth.getUser();
+    userEmailLabel.textContent = user.user_metadata?.username || '';
+
+    const { data: team, error } = await sb
+      .from('teams')
+      .select('id, name, division_id, divisions(name)')
+      .eq('owner_id', user.id)
+      .maybeSingle();
+
+    if (error){
+      setMsg(teamMsg, 'Error cargando tu equipo: ' + error.message, 'error');
+      createTeamBlock.classList.remove('hidden');
+      return;
+    }
+
+    if (team){
+      showTeamBadge(team);
+    } else {
+      createTeamBlock.classList.remove('hidden');
+    }
+  }
+
+  function showTeamBadge(team){
+    createTeamBlock.classList.add('hidden');
+    teamBadgeBlock.classList.remove('hidden');
+    teamNameLabel.textContent = team.name;
+    crestInitial.textContent = team.name.trim().charAt(0).toUpperCase() || '?';
+    teamDivisionLabel.textContent = team.divisions ? team.divisions.name : 'Sin división';
+    teamCard.classList.add('wide');
+    loadStandings(team.division_id, team.divisions ? team.divisions.name : '', team.id);
+  }
+
+  async function loadStandings(divisionId, divisionName, myTeamId){
+    standingsTitle.textContent = 'Tabla de posiciones — ' + divisionName;
+    const { data: rows, error } = await sb
+      .from('teams')
+      .select('id, name, points, wins, draws, losses, goals_for, goals_against')
+      .eq('division_id', divisionId);
+
+    if (error){
+      standingsBlock.classList.remove('hidden');
+      standingsBody.innerHTML = `<tr><td colspan="10">Error cargando la tabla: ${error.message}</td></tr>`;
+      return;
+    }
+
+    rows.sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      const dgA = a.goals_for - a.goals_against, dgB = b.goals_for - b.goals_against;
+      if (dgB !== dgA) return dgB - dgA;
+      if (b.goals_for !== a.goals_for) return b.goals_for - a.goals_for;
+      return a.name.localeCompare(b.name);
+    });
+
+    standingsBody.innerHTML = rows.map((r, i) => {
+      const played = r.wins + r.draws + r.losses;
+      const dg = r.goals_for - r.goals_against;
+      const isMe = r.id === myTeamId;
+      return `<tr class="${isMe ? 'me' : ''}">
+        <td>${i + 1}</td>
+        <td>${escapeHtml(r.name)}</td>
+        <td>${played}</td>
+        <td>${r.wins}</td>
+        <td>${r.draws}</td>
+        <td>${r.losses}</td>
+        <td>${r.goals_for}</td>
+        <td>${r.goals_against}</td>
+        <td>${dg > 0 ? '+' + dg : dg}</td>
+        <td class="pts">${r.points}</td>
+      </tr>`;
+    }).join('');
+
+    standingsBlock.classList.remove('hidden');
+  }
+
+  function escapeHtml(str){
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  createTeamBtn.addEventListener('click', async () => {
+    const name = teamNameInput.value.trim();
+    if (!name){
+      setMsg(teamMsg, 'Poné un nombre para tu equipo.', 'error');
+      return;
+    }
+    createTeamBtn.disabled = true;
+    clearMsg(teamMsg);
+
+    const { data: { user } } = await sb.auth.getUser();
+    const { data, error } = await sb
+      .from('teams')
+      .insert({ owner_id: user.id, name })
+      .select('id, name, division_id, divisions(name)')
+      .single();
+
+    createTeamBtn.disabled = false;
+    if (error){
+      setMsg(teamMsg, error.message, 'error');
+      return;
+    }
+    showTeamBadge(data);
+  });
+
+  // Si ya había sesión activa (recargó la página), saltar directo
+  sb.auth.getSession().then(({ data: { session } }) => {
+    if (session) onLoggedIn();
+  });
+})();
+</script>
+</body>
+</html>

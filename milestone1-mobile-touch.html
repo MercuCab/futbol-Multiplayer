@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Fútbol Multiplayer — Mobile (Milestone 1)</title>
+<style>
+  :root{
+    --grass1:#2e8b3d;
+    --grass2:#279235;
+    --line:#f0f0f0;
+    --p1:#3aa0ff;
+    --p2:#ff5a3a;
+    --ball:#ffffff;
+    --bg:#0b0d10;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
+  html,body{
+    margin:0; padding:0;
+    width:100%; height:100%;
+    background:var(--bg);
+    font-family:'Segoe UI', system-ui, sans-serif;
+    color:#eee;
+    overflow:hidden;
+    touch-action:none;
+    overscroll-behavior:none;
+  }
+  #app{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #fieldWrap{
+    position:relative;
+    line-height:0;
+  }
+  canvas{
+    display:block;
+    background:#000;
+    touch-action:none;
+  }
+
+  /* HUD superpuesto */
+  #hud{
+    position:absolute; top:8px; left:0; right:0;
+    display:flex; justify-content:center; align-items:center; gap:24px;
+    pointer-events:none;
+    font-variant-numeric:tabular-nums;
+  }
+  #score{
+    font-size:22px; font-weight:800;
+    background:rgba(0,0,0,.45);
+    padding:4px 14px; border-radius:20px;
+  }
+  #score span.p1{color:var(--p1);}
+  #score span.p2{color:var(--p2);}
+  #timer{
+    font-size:18px; font-weight:700;
+    background:rgba(0,0,0,.45);
+    padding:4px 12px; border-radius:20px;
+  }
+
+  /* Zonas de control táctil */
+  #touchLayer{
+    position:absolute; inset:0;
+  }
+  #joyZone{
+    position:absolute; left:0; top:0; bottom:0; width:45%;
+  }
+  #joyBase, #joyStick{
+    position:absolute;
+    border-radius:50%;
+    display:none;
+    pointer-events:none;
+  }
+  #joyBase{
+    width:110px; height:110px;
+    background:rgba(255,255,255,.12);
+    border:2px solid rgba(255,255,255,.35);
+    margin-left:-55px; margin-top:-55px;
+  }
+  #joyStick{
+    width:50px; height:50px;
+    background:rgba(58,160,255,.85);
+    margin-left:-25px; margin-top:-25px;
+  }
+  #kickBtn{
+    position:absolute;
+    right:5%; bottom:12%;
+    width:92px; height:92px;
+    border-radius:50%;
+    background:rgba(255,90,58,.35);
+    border:3px solid rgba(255,255,255,.55);
+    display:flex; align-items:center; justify-content:center;
+    font-size:15px; font-weight:800;
+    color:#fff;
+    letter-spacing:1px;
+  }
+  #kickBtn.active{
+    background:rgba(255,90,58,.75);
+    transform:scale(0.92);
+  }
+
+  /* Overlay rotación */
+  #rotateHint{
+    position:fixed; inset:0;
+    background:#0b0d10;
+    display:none;
+    align-items:center; justify-content:center;
+    flex-direction:column;
+    gap:14px;
+    z-index:20;
+    text-align:center;
+    padding:20px;
+  }
+  #rotateHint .icon{font-size:54px;}
+  @media (orientation: portrait) and (pointer: coarse){
+    #rotateHint{display:flex;}
+    #app{display:none;}
+  }
+
+  #overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.8);
+    display:none;
+    align-items:center; justify-content:center;
+    flex-direction:column;
+    gap:14px;
+    z-index:10;
+  }
+  #overlay h2{font-size:30px; margin:0;}
+  #overlay button{
+    padding:12px 26px;
+    font-size:16px;
+    border:none;
+    border-radius:10px;
+    background:#3aa0ff;
+    color:#fff;
+    cursor:pointer;
+    font-weight:700;
+  }
+  #goalFlash{
+    position:fixed; inset:0;
+    display:none;
+    align-items:center; justify-content:center;
+    font-size:15vw;
+    font-weight:900;
+    letter-spacing:4px;
+    color:#fff;
+    text-shadow:0 0 30px rgba(255,255,255,.8);
+    pointer-events:none;
+    z-index:5;
+  }
+</style>
+</head>
+<body>
+
+<div id="rotateHint">
+  <div class="icon">📱↻</div>
+  <div>Girá el celular para jugar<br><span style="color:#888;font-size:13px;">(modo horizontal)</span></div>
+</div>
+
+<div id="app">
+  <div id="fieldWrap">
+    <canvas id="field" width="900" height="560"></canvas>
+
+    <div id="hud">
+      <div id="score"><span class="p1">0</span> — <span class="p2">0</span></div>
+      <div id="timer">3:00</div>
+    </div>
+
+    <div id="touchLayer">
+      <div id="joyZone"></div>
+      <div id="joyBase"></div>
+      <div id="joyStick"></div>
+      <div id="kickBtn">PATEAR</div>
+    </div>
+  </div>
+</div>
+
+<div id="goalFlash">¡GOL!</div>
+
+<div id="overlay">
+  <h2 id="overlayTitle">Fin del partido</h2>
+  <div id="overlaySubtitle" style="font-size:16px;color:#ccc;"></div>
+  <button id="restartBtn">Jugar de nuevo</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('field');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  function getCss(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+
+  // --- Ajuste responsive del canvas (letterbox manteniendo aspecto) ---
+  function fitCanvas(){
+    const aspect = W / H;
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+    let cw, ch;
+    if (availW / availH > aspect){
+      ch = availH;
+      cw = ch * aspect;
+    } else {
+      cw = availW;
+      ch = cw / aspect;
+    }
+    canvas.style.width = cw + 'px';
+    canvas.style.height = ch + 'px';
+    document.getElementById('fieldWrap').style.width = cw + 'px';
+    document.getElementById('fieldWrap').style.height = ch + 'px';
+  }
+  window.addEventListener('resize', fitCanvas);
+  window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 200));
+  fitCanvas();
+
+  // --- Config cancha ---
+  const MARGIN = 30;
+  const GOAL_HEIGHT = 160;
+  const GOAL_DEPTH = 22;
+  const goalTop = H/2 - GOAL_HEIGHT/2;
+  const goalBottom = H/2 + GOAL_HEIGHT/2;
+  const MATCH_SECONDS = 3 * 60;
+
+  function makePlayer(x, y, color, team){
+    return {
+      x, y, vx:0, vy:0, r:18, color, team,
+      speed: 0.55, maxSpeed: 4.2, friction: 0.85,
+      kickCooldown: 0
+    };
+  }
+
+  const p1 = makePlayer(W*0.25, H/2, getCss('--p1'), 1); // jugador humano (touch)
+  const p2 = makePlayer(W*0.75, H/2, getCss('--p2'), 2); // IA rival
+
+  const ball = { x: W/2, y: H/2, vx:0, vy:0, r:10, friction: 0.985 };
+
+  function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+
+  // ================= CONTROLES TÁCTILES =================
+  const joyZone = document.getElementById('joyZone');
+  const joyBase = document.getElementById('joyBase');
+  const joyStick = document.getElementById('joyStick');
+  const kickBtn = document.getElementById('kickBtn');
+
+  const input = { ax:0, ay:0, kick:false };
+
+  let joyTouchId = null;
+  let joyOriginX = 0, joyOriginY = 0;
+  const JOY_MAX = 55;
+
+  function joyStart(id, x, y){
+    joyTouchId = id;
+    joyOriginX = x; joyOriginY = y;
+    joyBase.style.left = x + 'px';
+    joyBase.style.top = y + 'px';
+    joyBase.style.display = 'block';
+    joyStick.style.display = 'block';
+    joyStick.style.left = x + 'px';
+    joyStick.style.top = y + 'px';
+  }
+  function joyMove(x, y){
+    let dx = x - joyOriginX, dy = y - joyOriginY;
+    const d = Math.hypot(dx, dy);
+    if (d > JOY_MAX){ dx = dx/d*JOY_MAX; dy = dy/d*JOY_MAX; }
+    joyStick.style.left = (joyOriginX + dx) + 'px';
+    joyStick.style.top = (joyOriginY + dy) + 'px';
+    input.ax = dx / JOY_MAX;
+    input.ay = dy / JOY_MAX;
+  }
+  function joyEnd(){
+    joyTouchId = null;
+    joyBase.style.display = 'none';
+    joyStick.style.display = 'none';
+    input.ax = 0; input.ay = 0;
+  }
+
+  joyZone.addEventListener('touchstart', e => {
+    for (const t of e.changedTouches){
+      if (joyTouchId === null){
+        joyStart(t.identifier, t.clientX, t.clientY);
+      }
+    }
+    e.preventDefault();
+  }, {passive:false});
+
+  joyZone.addEventListener('touchmove', e => {
+    for (const t of e.changedTouches){
+      if (t.identifier === joyTouchId) joyMove(t.clientX, t.clientY);
+    }
+    e.preventDefault();
+  }, {passive:false});
+
+  function joyTouchEndHandler(e){
+    for (const t of e.changedTouches){
+      if (t.identifier === joyTouchId) joyEnd();
+    }
+  }
+  joyZone.addEventListener('touchend', joyTouchEndHandler);
+  joyZone.addEventListener('touchcancel', joyTouchEndHandler);
+
+  // Mouse fallback (para probar en PC arrastrando con el mouse)
+  let mouseDown = false;
+  joyZone.addEventListener('mousedown', e => { mouseDown = true; joyStart('mouse', e.clientX, e.clientY); });
+  window.addEventListener('mousemove', e => { if (mouseDown) joyMove(e.clientX, e.clientY); });
+  window.addEventListener('mouseup', () => { if (mouseDown){ mouseDown = false; joyEnd(); } });
+
+  kickBtn.addEventListener('touchstart', e => {
+    input.kick = true;
+    kickBtn.classList.add('active');
+    e.preventDefault();
+  }, {passive:false});
+  kickBtn.addEventListener('touchend', e => {
+    input.kick = false;
+    kickBtn.classList.remove('active');
+    e.preventDefault();
+  }, {passive:false});
+  kickBtn.addEventListener('mousedown', () => { input.kick = true; kickBtn.classList.add('active'); });
+  window.addEventListener('mouseup', () => { input.kick = false; kickBtn.classList.remove('active'); });
+
+  // ================= ESTADO DE PARTIDO =================
+  let score1 = 0, score2 = 0;
+  let timeLeft = MATCH_SECONDS;
+  let running = true;
+  let lastTick = performance.now();
+  let goalFreeze = 0;
+
+  const scoreEl = document.querySelector('#score');
+  const timerEl = document.getElementById('timer');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlaySubtitle = document.getElementById('overlaySubtitle');
+  const goalFlash = document.getElementById('goalFlash');
+  document.getElementById('restartBtn').addEventListener('click', resetMatch);
+
+  function updateHud(){
+    scoreEl.innerHTML = `<span class="p1">${score1}</span> — <span class="p2">${score2}</span>`;
+    const m = Math.floor(Math.max(0,timeLeft) / 60);
+    const s = Math.floor(Math.max(0,timeLeft) % 60).toString().padStart(2,'0');
+    timerEl.textContent = `${m}:${s}`;
+  }
+
+  function resetPositions(){
+    p1.x = W*0.25; p1.y = H/2; p1.vx = 0; p1.vy = 0;
+    p2.x = W*0.75; p2.y = H/2; p2.vx = 0; p2.vy = 0;
+    ball.x = W/2; ball.y = H/2; ball.vx = 0; ball.vy = 0;
+  }
+
+  function resetMatch(){
+    score1 = 0; score2 = 0; timeLeft = MATCH_SECONDS;
+    running = true;
+    resetPositions();
+    overlay.style.display = 'none';
+    updateHud();
+    lastTick = performance.now();
+  }
+
+  function goalScored(forPlayer){
+    if (forPlayer === 1) score1++; else score2++;
+    updateHud();
+    goalFlash.style.display = 'flex';
+    goalFreeze = 900;
+    setTimeout(() => { goalFlash.style.display = 'none'; }, 900);
+    resetPositions();
+  }
+
+  function endMatch(){
+    running = false;
+    overlay.style.display = 'flex';
+    if (score1 === score2){
+      overlayTitle.textContent = 'Empate';
+      overlaySubtitle.textContent = `${score1} — ${score2}`;
+    } else {
+      const winner = score1 > score2 ? 'Vos' : 'Rival (IA)';
+      overlayTitle.textContent = score1 > score2 ? '¡Ganaste!' : 'Perdiste';
+      overlaySubtitle.textContent = `${score1} — ${score2}`;
+    }
+  }
+
+  // ================= FÍSICA =================
+  function movePlayer(player, ax, ay){
+    if (ax !== 0 || ay !== 0){
+      const m = Math.hypot(ax, ay);
+      if (m > 1){ ax /= m; ay /= m; }
+      player.vx += ax * player.speed;
+      player.vy += ay * player.speed;
+    }
+    const sp = Math.hypot(player.vx, player.vy);
+    if (sp > player.maxSpeed){
+      player.vx = player.vx / sp * player.maxSpeed;
+      player.vy = player.vy / sp * player.maxSpeed;
+    }
+    player.vx *= player.friction;
+    player.vy *= player.friction;
+    player.x += player.vx;
+    player.y += player.vy;
+    player.x = clamp(player.x, MARGIN + player.r, W - MARGIN - player.r);
+    player.y = clamp(player.y, MARGIN + player.r, H - MARGIN - player.r);
+    if (player.kickCooldown > 0) player.kickCooldown--;
+  }
+
+  function tryKick(player, dirOverride){
+    const d = Math.hypot(ball.x - player.x, ball.y - player.y);
+    const reach = player.r + ball.r + 14;
+    if (d < reach && player.kickCooldown === 0){
+      let dx, dy;
+      if (dirOverride){
+        dx = dirOverride.x; dy = dirOverride.y;
+      } else {
+        dx = (ball.x - player.x) / (d || 1);
+        dy = (ball.y - player.y) / (d || 1);
+      }
+      const KICK_POWER = 11.5;
+      ball.vx += dx * KICK_POWER;
+      ball.vy += dy * KICK_POWER;
+      player.kickCooldown = 18;
+    }
+  }
+
+  function updateBall(){
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+    ball.vx *= ball.friction;
+    ball.vy *= ball.friction;
+    if (Math.hypot(ball.vx, ball.vy) < 0.02){ ball.vx = 0; ball.vy = 0; }
+
+    if (ball.y - ball.r < MARGIN){ ball.y = MARGIN + ball.r; ball.vy *= -0.7; }
+    if (ball.y + ball.r > H - MARGIN){ ball.y = H - MARGIN - ball.r; ball.vy *= -0.7; }
+
+    const inGoalMouthY = ball.y > goalTop && ball.y < goalBottom;
+
+    if (ball.x - ball.r < MARGIN){
+      if (inGoalMouthY){
+        if (ball.x < MARGIN - GOAL_DEPTH) goalScored(2);
+      } else {
+        ball.x = MARGIN + ball.r; ball.vx *= -0.7;
+      }
+    }
+    if (ball.x + ball.r > W - MARGIN){
+      if (inGoalMouthY){
+        if (ball.x > W - MARGIN + GOAL_DEPTH) goalScored(1);
+      } else {
+        ball.x = W - MARGIN - ball.r; ball.vx *= -0.7;
+      }
+    }
+  }
+
+  function resolvePlayerBallCollision(player){
+    const dx = ball.x - player.x, dy = ball.y - player.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = player.r + ball.r;
+    if (dist < minDist && dist > 0){
+      const nx = dx / dist, ny = dy / dist;
+      const overlap = minDist - dist;
+      ball.x += nx * overlap;
+      ball.y += ny * overlap;
+      const push = 0.6;
+      ball.vx += nx * (Math.hypot(player.vx, player.vy) * push + 0.5);
+      ball.vy += ny * (Math.hypot(player.vx, player.vy) * push + 0.5);
+    }
+  }
+
+  function resolvePlayerPlayerCollision(a, b){
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = a.r + b.r;
+    if (dist < minDist && dist > 0){
+      const nx = dx / dist, ny = dy / dist;
+      const overlap = (minDist - dist) / 2;
+      a.x -= nx * overlap; a.y -= ny * overlap;
+      b.x += nx * overlap; b.y += ny * overlap;
+    }
+  }
+
+  // --- IA simple: se ubica del lado contrario al arco propio respecto de la pelota, y patea hacia el arco izquierdo ---
+  function updateAI(){
+    const ownGoalX = MARGIN - GOAL_DEPTH/2;
+    const ownGoalY = H/2;
+    let gx = ownGoalX - ball.x, gy = ownGoalY - ball.y;
+    const gd = Math.hypot(gx, gy) || 1;
+    gx /= gd; gy /= gd;
+
+    const approachX = ball.x - gx * (p2.r + ball.r + 22);
+    const approachY = ball.y - gy * (p2.r + ball.r + 22);
+
+    let ax = approachX - p2.x, ay = approachY - p2.y;
+    const ad = Math.hypot(ax, ay) || 1;
+    ax /= ad; ay /= ad;
+
+    // un poco de "nerviosismo" para que no sea perfecta
+    movePlayer(p2, ax * 0.85, ay * 0.85);
+
+    const d = Math.hypot(ball.x - p2.x, ball.y - p2.y);
+    if (d < p2.r + ball.r + 14){
+      tryKick(p2, { x: gx, y: gy });
+    }
+  }
+
+  // ================= RENDER =================
+  function drawField(){
+    ctx.fillStyle = '#0a2b0f';
+    ctx.fillRect(0,0,W,H);
+    const stripes = 10;
+    const stripeW = (W - MARGIN*2) / stripes;
+    for (let i=0;i<stripes;i++){
+      ctx.fillStyle = i % 2 === 0 ? getCss('--grass1') : getCss('--grass2');
+      ctx.fillRect(MARGIN + i*stripeW, MARGIN, stripeW+1, H - MARGIN*2);
+    }
+    ctx.strokeStyle = getCss('--line');
+    ctx.lineWidth = 3;
+    ctx.strokeRect(MARGIN, MARGIN, W - MARGIN*2, H - MARGIN*2);
+    ctx.beginPath();
+    ctx.moveTo(W/2, MARGIN); ctx.lineTo(W/2, H-MARGIN);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(W/2, H/2, 60, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(MARGIN - GOAL_DEPTH, goalTop, GOAL_DEPTH, GOAL_HEIGHT);
+    ctx.strokeRect(W - MARGIN, goalTop, GOAL_DEPTH, GOAL_HEIGHT);
+  }
+
+  function drawPlayer(p){
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(0,0,0,.4)';
+    ctx.stroke();
+  }
+
+  function drawBall(){
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2);
+    ctx.fillStyle = getCss('--ball');
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#333';
+    ctx.stroke();
+  }
+
+  // ================= LOOP =================
+  function loop(now){
+    const dt = now - lastTick;
+    lastTick = now;
+
+    if (running){
+      if (goalFreeze > 0){
+        goalFreeze -= dt;
+      } else {
+        movePlayer(p1, input.ax, input.ay);
+        if (input.kick) tryKick(p1);
+        updateAI();
+
+        resolvePlayerPlayerCollision(p1, p2);
+        resolvePlayerBallCollision(p1);
+        resolvePlayerBallCollision(p2);
+        updateBall();
+
+        timeLeft -= dt/1000;
+        if (timeLeft <= 0){
+          timeLeft = 0;
+          updateHud();
+          endMatch();
+        } else if (Math.floor(timeLeft) !== Math.floor(timeLeft + dt/1000)) {
+          updateHud();
+        }
+      }
+    }
+
+    drawField();
+    drawPlayer(p1);
+    drawPlayer(p2);
+    drawBall();
+
+    requestAnimationFrame(loop);
+  }
+
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
